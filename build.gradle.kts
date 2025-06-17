@@ -16,6 +16,20 @@ java {
 }
 
 repositories {
+    maven {
+        url = uri("https://maven.aliyun.com/repository/public/")
+    }
+    maven {
+        url = uri("https://maven.aliyun.com/repository/google/")
+    }
+    maven {
+        url = uri("https://maven.aliyun.com/repository/gradle-plugin/")
+    }
+    maven {
+        url = uri("https://maven.aliyun.com/repository/spring/")
+    }
+
+    mavenLocal()
     mavenCentral()
 }
 
@@ -28,6 +42,7 @@ dependencies {
     
     // Kotlin
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     
     // Kafka

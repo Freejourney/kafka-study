@@ -10,7 +10,7 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Primary
 import org.springframework.data.redis.connection.RedisConnectionFactory
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration
-import org.springframework.data.redis.connection.jedis.JedisConnectionFactory
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer
 import org.springframework.data.redis.serializer.StringRedisSerializer
@@ -25,11 +25,11 @@ class RedisConfig {
     private var redisPort: Int = 6379
     
     @Bean
-    fun jedisConnectionFactory(): JedisConnectionFactory {
+    fun lettuceConnectionFactory(): LettuceConnectionFactory {
         val redisStandaloneConfiguration = RedisStandaloneConfiguration()
         redisStandaloneConfiguration.hostName = redisHost
         redisStandaloneConfiguration.port = redisPort
-        return JedisConnectionFactory(redisStandaloneConfiguration)
+        return LettuceConnectionFactory(redisStandaloneConfiguration)
     }
     
     @Bean
@@ -52,6 +52,7 @@ class RedisConfig {
     fun objectMapper(): ObjectMapper {
         val mapper = ObjectMapper()
         mapper.registerModule(KotlinModule.Builder().build())
+        mapper.findAndRegisterModules()
         return mapper
     }
     
