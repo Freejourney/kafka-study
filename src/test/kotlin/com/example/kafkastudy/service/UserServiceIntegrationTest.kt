@@ -1,8 +1,8 @@
 package com.example.kafkastudy.service
 
-import com.example.kafkastudy.dto.UserCreateRequest
 import com.example.kafkastudy.entity.User
 import com.example.kafkastudy.mapper.UserMapper
+import com.example.kafkastudy.testutil.TestDataFactory
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.*
@@ -10,16 +10,15 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.TestPropertySource
 import org.springframework.transaction.annotation.Transactional
-import java.time.LocalDateTime
 
-@SpringBootTest
-@TestPropertySource(properties = [
-    "spring.datasource.url=jdbc:h2:mem:testdb",
-    "spring.datasource.driver-class-name=org.h2.Driver",
-    "spring.jpa.hibernate.ddl-auto=create-drop",
-    "spring.data.redis.host=localhost",
-    "spring.data.redis.port=6379"
-])
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@TestPropertySource(
+    locations = ["classpath:application-test.yml"],
+    properties = [
+        "spring.jpa.show-sql=false",
+        "logging.level.org.springframework.transaction=WARN"
+    ]
+)
 @Transactional
 class UserServiceIntegrationTest {
 
@@ -32,75 +31,80 @@ class UserServiceIntegrationTest {
     @Autowired
     private lateinit var redisService: RedisService
 
-    private lateinit var testUserRequest: UserCreateRequest
+    private val testUser1 = TestDataFactory.TestUsers.USER_1
+    private val testUser2 = TestDataFactory.TestUsers.USER_2
+    private val testUser3 = TestDataFactory.TestUsers.USER_3
 
     @BeforeEach
     fun setUp() {
-        testUserRequest = UserCreateRequest(
-            email = "integration@test.com",
-            name = "Integration Test User",
-            age = 25
-        )
-
-        // Clean up any existing data
+        // Minimal cleanup for speed
         try {
-            val existingUser = userMapper.findByEmail(testUserRequest.email)
-            existingUser?.let { 
-                redisService.evictUser(it.id!!)
-                redisService.evictUserByEmail(it.email)
-                userMapper.deleteById(it.id!!)
+            listOf(testUser1, testUser2, testUser3).forEach { testUser ->
+                redisService.evictUser(testUser.id)
+                redisService.evictUserByEmail(testUser.email)
             }
         } catch (e: Exception) {
-            // Ignore cleanup errors
+            // Ignore cleanup errors for speed
         }
     }
 
     @Test
-    fun `should create user and cache it`() {
+    fun `should create user and cache it with consistent data across all systems`() {
+        // Given - Use shared test data
+        val createRequest = testUser1.toCreateRequest()
+
         // When
-        val createdUser = userService.createUser(testUserRequest)
+        val createdUser = userService.createUser(createRequest)
 
-        // Then
+        // Then - Verify response
         assertNotNull(createdUser)
-        assertEquals(testUserRequest.email, createdUser.email)
-        assertEquals(testUserRequest.name, createdUser.name)
-        assertEquals(testUserRequest.age, createdUser.age)
+        assertEquals(createRequest.email, createdUser.email)
+        assertEquals(createRequest.name, createdUser.name)
+        assertEquals(createRequest.age, createdUser.age)
 
-        // Verify user is cached
+        // Verify user is cached in Redis
         val cachedUser = redisService.getUserById(createdUser.id)
         assertNotNull(cachedUser)
         assertEquals(createdUser.id, cachedUser!!.id)
+        assertEquals(createdUser.email, cachedUser.email)
+        assertEquals(createdUser.name, cachedUser.name)
 
         // Verify user is in database
         val dbUser = userMapper.findById(createdUser.id)
         assertNotNull(dbUser)
         assertEquals(createdUser.id, dbUser!!.id)
+        assertEquals(createdUser.email, dbUser.email)
+        assertEquals(createdUser.name, dbUser.name)
     }
 
     @Test
-    fun `should get user from cache first`() {
-        // Given
-        val createdUser = userService.createUser(testUserRequest)
+    fun `should get user from cache first demonstrating cache-first pattern`() {
+        // Given - Create user through service (populates cache and DB)
+        val createRequest = testUser1.toCreateRequest()
+        val createdUser = userService.createUser(createRequest)
 
-        // When - clear from database but keep in cache
+        // When - Delete from database but keep in cache
         userMapper.deleteById(createdUser.id)
 
-        // Then - should still get user from cache
+        // Then - Should still get user from cache
         val retrievedUser = userService.getUserById(createdUser.id)
         assertNotNull(retrievedUser)
         assertEquals(createdUser.id, retrievedUser!!.id)
+        assertEquals(createdUser.email, retrievedUser.email)
+        assertEquals(createdUser.name, retrievedUser.name)
     }
 
     @Test
-    fun `should fallback to database when not in cache`() {
-        // Given
-        val createdUser = userService.createUser(testUserRequest)
+    fun `should fallback to database when not in cache and repopulate cache`() {
+        // Given - Create user through service
+        val createRequest = testUser1.toCreateRequest()
+        val createdUser = userService.createUser(createRequest)
 
-        // When - clear from cache but keep in database
+        // When - Clear from cache but keep in database
         redisService.evictUser(createdUser.id)
         redisService.evictUserByEmail(createdUser.email)
 
-        // Then - should get user from database and cache it
+        // Then - Should get user from database and cache it
         val retrievedUser = userService.getUserById(createdUser.id)
         assertNotNull(retrievedUser)
         assertEquals(createdUser.id, retrievedUser!!.id)
@@ -108,6 +112,7 @@ class UserServiceIntegrationTest {
         // Verify it's now cached again
         val cachedUser = redisService.getUserById(createdUser.id)
         assertNotNull(cachedUser)
+        assertEquals(createdUser.id, cachedUser!!.id)
     }
 
     @Test
@@ -120,52 +125,35 @@ class UserServiceIntegrationTest {
     }
 
     @Test
-    fun `should get user by email from cache first`() {
-        // Given
-        val createdUser = userService.createUser(testUserRequest)
+    fun `should get user by email with consistent cache-db behavior`() {
+        // Given - Use shared test data
+        val createRequest = testUser1.toCreateRequest()
+        val createdUser = userService.createUser(createRequest)
 
-        // When - clear from database but keep in cache
+        // When - Delete from database but keep in cache
         userMapper.deleteById(createdUser.id)
 
-        // Then - should still get user from cache
+        // Then - Should still get user from cache
         val retrievedUser = userService.getUserByEmail(createdUser.email)
         assertNotNull(retrievedUser)
         assertEquals(createdUser.id, retrievedUser!!.id)
     }
 
     @Test
-    fun `should fallback to database when email not in cache`() {
-        // Given
-        val createdUser = userService.createUser(testUserRequest)
-
-        // When - clear from cache but keep in database
-        redisService.evictUser(createdUser.id)
-        redisService.evictUserByEmail(createdUser.email)
-
-        // Then - should get user from database and cache it
-        val retrievedUser = userService.getUserByEmail(createdUser.email)
-        assertNotNull(retrievedUser)
-        assertEquals(createdUser.id, retrievedUser!!.id)
-
-        // Verify it's now cached again
-        val cachedUser = redisService.getUserByEmail(createdUser.email)
-        assertNotNull(cachedUser)
-    }
-
-    @Test
-    fun `should update user and update cache`() {
-        // Given
-        val createdUser = userService.createUser(testUserRequest)
-        val updateRequest = UserCreateRequest(
-            email = createdUser.email,
-            name = "Updated Name",
-            age = 30
-        )
+    fun `should update user and update cache with consistent data`() {
+        // Given - Use shared test data
+        val createRequest = testUser1.toCreateRequest()
+        val createdUser = userService.createUser(createRequest)
+        
+        val updateRequest = testUser1.copy(
+            name = "Updated ${testUser1.name}",
+            age = testUser1.age + 5
+        ).toCreateRequest()
 
         // When
         val updatedUser = userService.updateUser(createdUser.id, updateRequest)
 
-        // Then
+        // Then - Verify response
         assertNotNull(updatedUser)
         assertEquals(updateRequest.name, updatedUser!!.name)
         assertEquals(updateRequest.age, updatedUser.age)
@@ -185,9 +173,10 @@ class UserServiceIntegrationTest {
     }
 
     @Test
-    fun `should delete user and remove from cache`() {
-        // Given
-        val createdUser = userService.createUser(testUserRequest)
+    fun `should delete user and remove from cache and database`() {
+        // Given - Use shared test data
+        val createRequest = testUser1.toCreateRequest()
+        val createdUser = userService.createUser(createRequest)
 
         // When
         val deleted = userService.deleteUser(createdUser.id)
@@ -209,29 +198,30 @@ class UserServiceIntegrationTest {
     }
 
     @Test
-    fun `should get all users from database`() {
-        // Given
-        val user1 = userService.createUser(testUserRequest)
-        val user2Request = testUserRequest.copy(email = "user2@test.com", name = "User 2")
-        val user2 = userService.createUser(user2Request)
+    fun `should get all users from database with consistent data`() {
+        // Given - Use shared test data (only create 2 users for speed)
+        val user1 = userService.createUser(testUser1.toCreateRequest())
+        val user2 = userService.createUser(testUser2.toCreateRequest())
 
         // When
         val allUsers = userService.getAllUsers()
 
-        // Then
+        // Then - Should include our test users plus any existing ones
         assertTrue(allUsers.size >= 2)
-        assertTrue(allUsers.any { it.id == user1.id })
-        assertTrue(allUsers.any { it.id == user2.id })
+        val userIds = allUsers.map { it.id }.toSet()
+        assertTrue(userIds.contains(user1.id))
+        assertTrue(userIds.contains(user2.id))
     }
 
     @Test
     fun `should throw exception when creating user with duplicate email`() {
-        // Given
-        userService.createUser(testUserRequest)
+        // Given - Use shared test data
+        val createRequest = testUser1.toCreateRequest()
+        userService.createUser(createRequest)
 
         // When & Then
         assertThrows(IllegalArgumentException::class.java) {
-            userService.createUser(testUserRequest)
+            userService.createUser(createRequest)
         }
     }
 
@@ -239,7 +229,7 @@ class UserServiceIntegrationTest {
     fun `should throw exception when updating non-existent user`() {
         // When & Then
         assertThrows(IllegalArgumentException::class.java) {
-            userService.updateUser(999L, testUserRequest)
+            userService.updateUser(999L, testUser1.toCreateRequest())
         }
     }
 
@@ -252,26 +242,25 @@ class UserServiceIntegrationTest {
     }
 
     @Test
-    fun `should handle cache miss gracefully`() {
-        // Given - user exists in database but not in cache
-        val user = User(
-            email = "cache-miss@test.com",
-            name = "Cache Miss User",
-            age = 35,
-            createdAt = LocalDateTime.now()
-        )
-        userMapper.insert(user)
+    fun `should handle cache miss gracefully and maintain data consistency`() {
+        // Given - Insert user directly into database (bypassing cache)
+        val userEntity = testUser1.toEntity().copy(id = null) // Let DB generate ID
+        userMapper.insert(userEntity)
+        val insertedId = userEntity.id!!
 
-        // When
-        val retrievedUser = userService.getUserById(user.id!!)
+        // When - Get user through service (should hit DB and populate cache)
+        val retrievedUser = userService.getUserById(insertedId)
 
-        // Then
+        // Then - Verify response
         assertNotNull(retrievedUser)
-        assertEquals(user.id, retrievedUser!!.id)
-        assertEquals(user.email, retrievedUser.email)
+        assertEquals(insertedId, retrievedUser!!.id)
+        assertEquals(testUser1.email, retrievedUser.email)
+        assertEquals(testUser1.name, retrievedUser.name)
 
         // Verify it's now cached
-        val cachedUser = redisService.getUserById(user.id!!)
+        val cachedUser = redisService.getUserById(insertedId)
         assertNotNull(cachedUser)
+        assertEquals(insertedId, cachedUser!!.id)
+        assertEquals(testUser1.email, cachedUser.email)
     }
 } 

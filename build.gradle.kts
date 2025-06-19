@@ -64,7 +64,9 @@ dependencies {
     testImplementation("org.testcontainers:kafka")
     testImplementation("org.testcontainers:mysql")
     testImplementation("org.testcontainers:testcontainers")
-    testImplementation("it.ozimov:embedded-redis:0.7.3")
+    testImplementation("it.ozimov:embedded-redis:0.7.3") {
+        exclude(group = "org.slf4j", module = "slf4j-simple")
+    }
     testRuntimeOnly("com.h2database:h2")
 }
 

@@ -1,0 +1,79 @@
+spring:
+  application:
+    name: kafka-study-test
+  
+  profiles:
+    active: test
+  
+  main:
+    allow-bean-definition-overriding: true
+  
+  # H2 Test Database Configuration
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=MySQL
+    username: sa
+    password: 
+    driver-class-name: org.h2.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: none  # Use schema.sql instead
+    show-sql: false  # Reduce log noise in tests
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  
+  # Test-specific SQL initialization
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+      data-locations: # No additional data files
+  
+  # Embedded Redis Configuration for tests
+  data:
+    redis:
+      host: localhost
+      port: 6370  # Use different port for tests
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+  
+  # Kafka Configuration for tests - will be overridden by @EmbeddedKafka
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: test-group
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        spring.json.trusted.packages: "com.example.kafkastudy.dto"
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      retries: 3
+      properties:
+        linger.ms: 1
+
+# MyBatis Configuration
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.example.kafkastudy.entity
+  configuration:
+    map-underscore-to-camel-case: true
+
+# Test Logging - reduced verbosity
+logging:
+  level:
+    com.example.kafkastudy: INFO
+    org.springframework.kafka: WARN
+    org.springframework.sql: WARN
+    org.hibernate.SQL: WARN
+    org.apache.kafka: WARN
+    redis.embedded: WARN 
