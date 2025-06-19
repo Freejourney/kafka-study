@@ -27,6 +27,23 @@ services:
     networks:
       - kafka-network
 
+  kafdrop:
+    image: obsidiandynamics/kafdrop:latest
+    container_name: kafdrop
+    ports:
+      - "9000:9000"
+    environment:
+      # 关键修复：使用Kafka服务名称和内部端口
+      KAFKA_BROKERCONNECT: "kafka:29092"
+      # 可选：增加启动等待时间
+      KAFDROP_STARTUP_TIMEOUT_MS: "60000"
+      JVM_OPTS: "-Xms32M -Xmx64M"
+    depends_on:
+      - kafka  # 确保Kafka先启动
+    restart: unless-stopped
+    networks:
+      - kafka-network
+
   mysql:
     image: mysql:8.0
     ports:
